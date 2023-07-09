@@ -8,7 +8,12 @@
 */
 
 // To interact with MMDevice
+using AudioDeviceCmdlets.Model;
 using CoreAudioApi;
+using Newtonsoft.Json;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 // To act as a PowerShell Cmdlet
 using System.Management.Automation;
 
@@ -1818,12 +1823,11 @@ namespace AudioDeviceCmdlets
 			// Create a new MMDeviceEnumerator
 			MMDeviceEnumerator DevEnum = new MMDeviceEnumerator();
 
-			string cuffieId = "{0.0.0.00000000}.{e13fd879-1ad0-4985-87a0-c1abf2cde488}";
-			string casseId = "{0.0.0.00000000}.{f0aa08e4-0cd6-49a5-8098-e342d2a318ea}";
-
 			// Create a AudioDeviceCreationToolkit
 			AudioDeviceCreationToolkit Toolkit = new AudioDeviceCreationToolkit(DevEnum);
+			ConfigFile config = LoadConfigFile();
 
+			// Get default audio device
 			MMDevice Device = null;
 			try
 			{
@@ -1834,22 +1838,51 @@ namespace AudioDeviceCmdlets
 				throw new System.ArgumentException("No playback AudioDevice found with the default role");
 			}
 
-			// Create a new audio PolicyConfigClient
-			PolicyConfigClient client = new PolicyConfigClient();
-			if (Device.ID == casseId)
+			// Find the index of the active audio device from the ConfigFile
+			List<Model.AudioDevice> devices = config.AudioDevices.ToList();
+			Model.AudioDevice current = devices.FirstOrDefault(d => d.Id == Device.ID);
+			int index;
+			if (current != null)
 			{
-				client.SetDefaultEndpoint(cuffieId, ERole.eMultimedia);
+				index = devices.IndexOf(current);
 			}
 			else
 			{
-				client.SetDefaultEndpoint(casseId, ERole.eMultimedia);
+				throw new System.InvalidOperationException("Invalid ConfigFile AudioDevice found. Check your configuration file.");
 			}
 
-			// Output the result of the creation of a new AudioDevice, while assining it its index, the MMDevice itself, its default state, and its default communication state
-			WriteObject(Device, Toolkit.IsDefaultCommunication(Device.ID));
+			// Set the index as the next audio device from the ConfigFile
+			if (index + 1 == devices.Count)
+			{
+				index = 0;
+			}
+			else
+			{
+				index++;
+			}
 
+			// Create a new audio PolicyConfigClient
+			PolicyConfigClient client = new PolicyConfigClient();
+			client.SetDefaultEndpoint(devices.ElementAt(index).Id, ERole.eMultimedia);
+
+			// Print the list of audio device from ConfigFile highlighting the active one
+			string[] devicesNames = config.DevicesName().ToArray();
+			devicesNames[index] = $">{devicesNames[index].Substring(1, devicesNames[index].Length - 1)}";
+			WriteObject(string.Join("\n", devicesNames));
+	
 			// Stop checking for other parameters
 			return;
+		}
+
+		private ConfigFile LoadConfigFile()
+		{
+			string configFilePath = "C:\\PowershellModuleData\\AudioDeviceCmdlets.json";
+			using (StreamReader r = new StreamReader(configFilePath))
+			{
+				string json = r.ReadToEnd();
+				ConfigFile fileConfig = JsonConvert.DeserializeObject<ConfigFile>(json);
+				return fileConfig;
+			}
 		}
 	}
 }
